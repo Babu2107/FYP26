@@ -60,6 +60,11 @@ class DualStreamSwinV2(nn.Module):
         """
         f_orig = self.backbone(x_orig)
         f_flip = self.backbone(x_flip)
+
+        # Swin V2 outputs (B, H, W, C) — convert to (B, C, H, W) for conv layers
+        f_orig = [f.permute(0, 3, 1, 2).contiguous() if f.dim() == 4 and f.shape[-1] in self.feature_dims else f for f in f_orig]
+        f_flip = [f.permute(0, 3, 1, 2).contiguous() if f.dim() == 4 and f.shape[-1] in self.feature_dims else f for f in f_flip]
+
         return f_orig, f_flip
 
     def get_feature_dims(self) -> list:
