@@ -1,7 +1,7 @@
 """
-PyTorch Lightning DataModule for ICH Dataset.
+PyTorch Lightning DataModule for ct-ich PhysioNet Dataset.
 
-Handles patient-level train/val/test splitting and data loading.
+Handles patient-level train/val/test splitting to prevent data leakage.
 """
 
 import torch
@@ -12,7 +12,10 @@ from typing import Optional
 try:
     import pytorch_lightning as pl
 except ImportError:
-    import lightning as pl
+    try:
+        import lightning as pl
+    except ImportError:
+        raise ImportError("Install pytorch-lightning or lightning")
 
 from .dataset import ICHDataset
 from .augmentations import get_train_transforms, get_val_transforms
@@ -20,9 +23,10 @@ from .augmentations import get_train_transforms, get_val_transforms
 
 class ICHDataModule(pl.LightningDataModule):
     """
-    Lightning DataModule for ICH panoptic segmentation.
+    DataModule for ct-ich dataset with patient-level splitting.
 
-    Splits data at PATIENT level (not slice level) to avoid data leakage.
+    Split: 60% train / 20% val / 20% test (at patient level).
+    75 patients → ~45 train / 15 val / 15 test
     """
 
     def __init__(
@@ -43,98 +47,92 @@ class ICHDataModule(pl.LightningDataModule):
         self.context_slices = context_slices
         self.train_ratio = train_ratio
         self.val_ratio = val_ratio
+        self.save_hyperparameters()
 
         self.train_dataset = None
         self.val_dataset = None
         self.test_dataset = None
 
     def setup(self, stage: Optional[str] = None):
-        """Setup datasets for each stage."""
-        train_transform = get_train_transforms(self.image_size)
-        val_transform = get_val_transforms(self.image_size)
+        """Create train/val/test datasets with patient-level splits."""
+        # First, create a temp dataset to discover all patients
+        temp_dataset = ICHDataset(
+            data_dir=self.data_dir,
+            transform=None,
+            image_size=self.image_size,
+            context_slices=self.context_slices,
+        )
 
-        # Check if data has pre-defined splits
-        data_path = Path(self.data_dir)
-        has_splits = (data_path / "train").exists()
+        all_patients = temp_dataset.get_all_patient_ids()
+        n_total = len(all_patients)
+        n_train = int(n_total * self.train_ratio)
+        n_val = int(n_total * self.val_ratio)
 
-        if has_splits:
-            if stage == "fit" or stage is None:
-                self.train_dataset = ICHDataset(
-                    str(data_path / "train"), split="train",
-                    transform=train_transform, image_size=self.image_size,
-                    context_slices=self.context_slices,
-                )
-                self.val_dataset = ICHDataset(
-                    str(data_path / "val"), split="val",
-                    transform=val_transform, image_size=self.image_size,
-                    context_slices=self.context_slices,
-                )
-            if stage == "test" or stage is None:
-                test_dir = data_path / "test"
-                if not test_dir.exists():
-                    test_dir = data_path / "val"
-                self.test_dataset = ICHDataset(
-                    str(test_dir), split="test",
-                    transform=val_transform, image_size=self.image_size,
-                    context_slices=self.context_slices,
-                )
-        else:
-            # Auto-split at patient level
-            full_dataset = ICHDataset(
-                self.data_dir, split="all",
-                transform=None, image_size=self.image_size,
+        # Deterministic split
+        train_patients = all_patients[:n_train]
+        val_patients = all_patients[n_train:n_train + n_val]
+        test_patients = all_patients[n_train + n_val:]
+
+        print(f"Dataset split: {n_total} patients total")
+        print(f"  Train: {len(train_patients)} patients → {train_patients}")
+        print(f"  Val:   {len(val_patients)} patients → {val_patients}")
+        print(f"  Test:  {len(test_patients)} patients → {test_patients}")
+
+        # Create datasets
+        if stage == "fit" or stage is None:
+            self.train_dataset = ICHDataset(
+                data_dir=self.data_dir,
+                transform=get_train_transforms(self.image_size),
+                image_size=self.image_size,
                 context_slices=self.context_slices,
+                patient_ids=train_patients,
             )
+            self.val_dataset = ICHDataset(
+                data_dir=self.data_dir,
+                transform=get_val_transforms(self.image_size),
+                image_size=self.image_size,
+                context_slices=self.context_slices,
+                patient_ids=val_patients,
+            )
+            print(f"  Train samples: {len(self.train_dataset)}")
+            print(f"  Val samples:   {len(self.val_dataset)}")
 
-            # Group samples by patient
-            patient_samples = {}
-            for idx, sample in enumerate(full_dataset.samples):
-                pid = sample.get('patient_id', f'p{idx}')
-                if pid not in patient_samples:
-                    patient_samples[pid] = []
-                patient_samples[pid].append(idx)
-
-            # Split patients
-            patients = sorted(patient_samples.keys())
-            n_train = int(len(patients) * self.train_ratio)
-            n_val = int(len(patients) * self.val_ratio)
-
-            train_patients = patients[:n_train]
-            val_patients = patients[n_train:n_train + n_val]
-            test_patients = patients[n_train + n_val:]
-
-            # Create index lists
-            train_indices = [i for p in train_patients for i in patient_samples[p]]
-            val_indices = [i for p in val_patients for i in patient_samples[p]]
-            test_indices = [i for p in test_patients for i in patient_samples[p]]
-
-            if stage == "fit" or stage is None:
-                self.train_dataset = torch.utils.data.Subset(full_dataset, train_indices)
-                self.train_dataset.dataset.transform = train_transform
-
-                self.val_dataset = torch.utils.data.Subset(full_dataset, val_indices)
-                # Val uses val transform (we'll handle this in getitem)
-
-            if stage == "test" or stage is None:
-                self.test_dataset = torch.utils.data.Subset(full_dataset, test_indices)
+        if stage == "test" or stage is None:
+            self.test_dataset = ICHDataset(
+                data_dir=self.data_dir,
+                transform=get_val_transforms(self.image_size),
+                image_size=self.image_size,
+                context_slices=self.context_slices,
+                patient_ids=test_patients,
+            )
+            print(f"  Test samples:  {len(self.test_dataset)}")
 
     def train_dataloader(self):
         return DataLoader(
-            self.train_dataset, batch_size=self.batch_size,
-            shuffle=True, num_workers=self.num_workers, pin_memory=True,
+            self.train_dataset,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
+            pin_memory=True,
             drop_last=True,
         )
 
     def val_dataloader(self):
         return DataLoader(
-            self.val_dataset, batch_size=self.batch_size,
-            shuffle=False, num_workers=self.num_workers, pin_memory=True,
+            self.val_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            pin_memory=True,
         )
 
     def test_dataloader(self):
         if self.test_dataset is None:
             return self.val_dataloader()
         return DataLoader(
-            self.test_dataset, batch_size=self.batch_size,
-            shuffle=False, num_workers=self.num_workers, pin_memory=True,
+            self.test_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            pin_memory=True,
         )

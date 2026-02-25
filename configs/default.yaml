@@ -20,7 +20,7 @@ model:
   
   panoptic_head:
     num_queries: 50
-    num_classes: 7  # 6 hemorrhage types + background
+    num_classes: 6  # 5 hemorrhage types + background
     hidden_dim: 256
     num_decoder_layers: 9
     num_feature_levels: 3
@@ -40,9 +40,10 @@ model:
     mode: "template"  # "template" or "llm"
 
 data:
+  data_dir: "data"  # Root path containing the ct-ich dataset
   image_size: 256
   context_slices: 2  # ±2 for 2.5D
-  num_classes: 7
+  num_classes: 6
   class_names:
     - "background"
     - "intraventricular"
@@ -50,7 +51,6 @@ data:
     - "subarachnoid"
     - "epidural"
     - "subdural"
-    - "ambiguous"
   
   windows:
     brain: {center: 40, width: 80}
