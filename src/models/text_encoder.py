@@ -54,11 +54,19 @@ class TextEncoder(nn.Module):
         try:
             from transformers import AutoModel, AutoTokenizer
             self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-            self._encoder = AutoModel.from_pretrained(self.model_name)
+            encoder = AutoModel.from_pretrained(self.model_name)
 
             if self.freeze_initial:
-                for param in self._encoder.parameters():
+                for param in encoder.parameters():
                     param.requires_grad = False
+
+            # Register as submodule so .to(device) moves it correctly
+            self.add_module('bert_encoder', encoder)
+            self._encoder = self.bert_encoder
+
+            # Move encoder to same device as projection layer
+            target_device = self._projection.weight.device
+            self._encoder = self._encoder.to(target_device)
 
         except ImportError:
             print("WARNING: transformers not installed. Using random text embeddings.")
