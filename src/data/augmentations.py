@@ -3,6 +3,9 @@ Augmentation Pipeline for ICH Dataset.
 
 Heavy augmentations critical for small dataset (81 patients).
 Uses albumentations for efficient, composable transforms.
+
+NOTE: HV maps are NOT augmented — they are recomputed from
+the augmented mask in the dataset __getitem__ method.
 """
 
 import numpy as np
@@ -21,19 +24,23 @@ def get_train_transforms(image_size: int = 256):
     """
     Training augmentations — aggressive for small dataset.
 
-    All transforms are applied consistently to image, mask, and additional targets.
+    Only image and mask are augmented. HV maps are recomputed
+    from the augmented mask afterward (in the dataset).
     """
     if not HAS_ALBU:
         return _fallback_transform(image_size)
 
     return A.Compose([
+        # Geometric transforms (applied to both image and mask)
         A.Rotate(limit=15, p=0.5, border_mode=0),
         A.ElasticTransform(alpha=50, sigma=5, p=0.3),
         A.RandomScale(scale_limit=0.15, p=0.3),
         A.RandomCrop(height=int(image_size * 0.875), width=int(image_size * 0.875), p=0.5),
         A.Resize(image_size, image_size),
+
+        # Pixel transforms (applied to image ONLY, not mask)
         A.GaussianBlur(blur_limit=3, p=0.2),
-        A.GaussNoise(var_limit=(0.001, 0.005), p=0.3),
+        A.GaussNoise(p=0.3),
         A.RandomBrightnessContrast(brightness_limit=0.1, contrast_limit=0.1, p=0.5),
         A.CoarseDropout(
             max_holes=3, max_height=32, max_width=32,
@@ -41,11 +48,8 @@ def get_train_transforms(image_size: int = 256):
             fill_value=0, p=0.2,
         ),
         ToTensorV2(),
-    ], additional_targets={
-        'mask': 'mask',
-        'instance_mask': 'mask',
-        'hv_map': 'image',
-    })
+    ])
+    # NOTE: No additional_targets for hv_map — it's recomputed after augmentation
 
 
 def get_val_transforms(image_size: int = 256):
@@ -56,11 +60,7 @@ def get_val_transforms(image_size: int = 256):
     return A.Compose([
         A.Resize(image_size, image_size),
         ToTensorV2(),
-    ], additional_targets={
-        'mask': 'mask',
-        'instance_mask': 'mask',
-        'hv_map': 'image',
-    })
+    ])
 
 
 class _fallback_transform:
@@ -70,7 +70,6 @@ class _fallback_transform:
         self.size = image_size
 
     def __call__(self, image, mask=None, **kwargs):
-        # Simple numpy → tensor conversion
         if isinstance(image, np.ndarray):
             if image.ndim == 2:
                 image = np.expand_dims(image, 0)
@@ -83,11 +82,5 @@ class _fallback_transform:
             if isinstance(mask, np.ndarray):
                 mask = torch.from_numpy(mask).long()
             result['mask'] = mask
-
-        for key, val in kwargs.items():
-            if isinstance(val, np.ndarray):
-                result[key] = torch.from_numpy(val)
-            else:
-                result[key] = val
 
         return result

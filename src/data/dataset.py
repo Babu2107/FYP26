@@ -256,56 +256,41 @@ class ICHDataset(Dataset):
                     primary_type = info['types'][0]
                     mask[binary_mask] = primary_type
 
-        # ------- HV MAPS -------
-        # Create instance-like mask for HoVer (connected components)
-        from scipy import ndimage
-        instance_mask_np = np.zeros_like(mask, dtype=np.int32)
-        if mask.max() > 0:
-            labeled, num = ndimage.label(mask > 0)
-            instance_mask_np = labeled
-
-        hv_maps = compute_hv_maps(torch.from_numpy(instance_mask_np.astype(np.int64))).numpy()
 
         # ------- TYPE LABELS -------
         type_labels = np.zeros(5, dtype=np.float32)
         for t in info['types']:
             type_labels[t - 1] = 1.0  # Convert 1-5 to 0-4 index
 
-        # ------- TRANSFORMS -------
+        # ------- TRANSFORMS (image + mask only) -------
         if self.transform:
-            # Transpose HV maps for albumentations: (2, H, W) → (H, W, 2)
-            hv_for_aug = hv_maps.transpose(1, 2, 0) if hv_maps.shape[0] == 2 else hv_maps
-
-            transformed = self.transform(image=image, mask=mask, hv_map=hv_for_aug)
+            transformed = self.transform(image=image, mask=mask)
             image_t = transformed['image']
             mask_t = transformed['mask']
-            hv_t = transformed.get('hv_map', hv_for_aug)
 
-            # Handle tensor conversions
             if isinstance(image_t, torch.Tensor):
                 image_tensor = image_t.float()
             else:
-                image_tensor = torch.from_numpy(image_t.transpose(2, 0, 1) if image_t.ndim == 3 else image_t).float()
+                image_tensor = torch.from_numpy(
+                    image_t.transpose(2, 0, 1) if image_t.ndim == 3 else image_t
+                ).float()
 
             if isinstance(mask_t, torch.Tensor):
                 mask_tensor = mask_t.long()
             else:
                 mask_tensor = torch.from_numpy(mask_t).long()
-
-            if isinstance(hv_t, torch.Tensor):
-                if hv_t.dim() == 3 and hv_t.shape[-1] == 2:
-                    hv_tensor = hv_t.permute(2, 0, 1).float()
-                else:
-                    hv_tensor = hv_t.float()
-            else:
-                if hv_t.ndim == 3 and hv_t.shape[-1] == 2:
-                    hv_tensor = torch.from_numpy(hv_t.transpose(2, 0, 1)).float()
-                else:
-                    hv_tensor = torch.from_numpy(hv_t).float()
         else:
             image_tensor = torch.from_numpy(image.transpose(2, 0, 1)).float()
             mask_tensor = torch.from_numpy(mask).long()
-            hv_tensor = torch.from_numpy(hv_maps).float()
+
+        # ------- HV MAPS (computed AFTER augmentation) -------
+        from scipy import ndimage
+        mask_np = mask_tensor.numpy() if isinstance(mask_tensor, torch.Tensor) else mask_tensor
+        instance_mask_np = np.zeros_like(mask_np, dtype=np.int32)
+        if mask_np.max() > 0:
+            labeled, _ = ndimage.label(mask_np > 0)
+            instance_mask_np = labeled
+        hv_tensor = compute_hv_maps(torch.from_numpy(instance_mask_np.astype(np.int64))).float()
 
         # Create flipped version
         image_flipped = torch.flip(image_tensor, dims=[2])
@@ -320,3 +305,4 @@ class ICHDataset(Dataset):
             'slice_idx': info['slice_idx'],
             'has_hemorrhage': info['has_hemorrhage'],
         }
+
