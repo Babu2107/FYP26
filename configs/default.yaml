@@ -1,0 +1,109 @@
+# SymPanICH-Net v2 Default Configuration
+
+model:
+  name: "SymPanICHNetV2"
+  backbone:
+    name: "swinv2_tiny_window8_256"
+    pretrained: true
+    embed_dim: 96
+    depths: [2, 2, 6, 2]
+    num_heads: [3, 6, 12, 24]
+    window_size: 8
+  
+  symmetry:
+    num_heads: 8
+    dropout: 0.1
+  
+  fpn:
+    in_channels: [96, 192, 384, 768]
+    out_channels: 256
+  
+  panoptic_head:
+    num_queries: 50
+    num_classes: 7  # 6 hemorrhage types + background
+    hidden_dim: 256
+    num_decoder_layers: 9
+    num_feature_levels: 3
+    mask_dim: 256
+  
+  hover:
+    in_channels: 256
+    mid_channels: 128
+  
+  text_encoder:
+    model_name: "microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract"
+    embed_dim: 256
+    freeze_initial: true
+  
+  report_generator:
+    enabled: true
+    mode: "template"  # "template" or "llm"
+
+data:
+  image_size: 256
+  context_slices: 2  # ±2 for 2.5D
+  num_classes: 7
+  class_names:
+    - "background"
+    - "intraventricular"
+    - "intraparenchymal"
+    - "subarachnoid"
+    - "epidural"
+    - "subdural"
+    - "ambiguous"
+  
+  windows:
+    brain: {center: 40, width: 80}
+    subdural: {center: 75, width: 215}
+    bone: {center: 600, width: 2800}
+  
+  split:
+    train: 0.6
+    val: 0.2
+    test: 0.2
+
+training:
+  max_epochs: 100
+  batch_size: 4
+  gradient_accumulation: 4  # effective batch = 16
+  num_workers: 4
+  precision: 16  # FP16 mixed precision
+  
+  optimizer:
+    name: "adamw"
+    lr: 1.0e-4
+    backbone_lr_scale: 0.1   # backbone LR = 1e-5
+    text_lr_scale: 0.05      # text LR = 5e-6
+    weight_decay: 0.05
+  
+  scheduler:
+    name: "poly"
+    power: 0.9
+    warmup_steps: 500
+  
+  early_stopping:
+    patience: 15
+    monitor: "val/pq"
+    mode: "max"
+  
+  phases:
+    warmup_epochs: 5       # Phase 1: freeze backbone + text
+    main_end: 60           # Phase 2: full training
+    finetune_end: 90       # Phase 3: lower LR
+    report_start: 91       # Phase 4: train report generator
+
+loss:
+  cls_weight: 2.0
+  dice_weight: 5.0
+  mask_focal_weight: 5.0
+  hv_weight: 1.0
+  deep_supervision_weight: 1.0
+  contrastive_weight: 0.5
+  text_cls_weight: 0.3
+  focal_gamma: 2.0
+  focal_alpha: 0.25
+
+wandb:
+  project: "sympanich-net-v2"
+  entity: null
+  log_every_n_steps: 10

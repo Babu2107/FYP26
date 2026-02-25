@@ -1,0 +1,8 @@
+{
+    "intraventricular": "Hyperdense fluid collection within the ventricular system, often with fluid-fluid levels and ventricular enlargement. Appears bright white inside ventricles on non-contrast CT.",
+    "intraparenchymal": "Well-defined hyperdense lesion within brain parenchyma, round or oval shape, surrounded by low-density perilesional edema ring creating a halo effect on CT.",
+    "subarachnoid": "Hyperdense material filling sulci and cisterns, following the contour of brain surface. Star-shaped pattern in basal cisterns with thin linear densities on CT.",
+    "epidural": "Biconvex lens-shaped hyperdense collection between skull inner table and dura mater. Does not cross suture lines with smooth inner margin on CT.",
+    "subdural": "Crescent-shaped hyperdense collection along brain convexity, crosses suture lines, follows dural reflections. May cause midline shift visible on CT.",
+    "ambiguous": "Ill-defined hyperdense region with mixed density patterns, unclear boundaries between adjacent hemorrhage types. May represent evolving or mixed hemorrhage on CT."
+}

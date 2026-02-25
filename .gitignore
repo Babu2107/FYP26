@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environment
+venv/
+env/
+.env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Data (too large for git)
+data/raw/
+data/processed/
+*.nii
+*.nii.gz
+
+# Model checkpoints
+checkpoints/
+*.ckpt
+*.pth
+*.pt
+
+# Experiment logs
+lightning_logs/
+wandb/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
