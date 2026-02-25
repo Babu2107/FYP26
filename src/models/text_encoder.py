@@ -78,14 +78,13 @@ class TextEncoder(nn.Module):
             with open(self._descriptions_path, 'r') as f:
                 return json.load(f)
 
-        # Default descriptions (fallback)
+        # Default descriptions (fallback) — 5 hemorrhage types only
         return {
             "intraventricular": "Hyperdense fluid collection within the ventricular system with fluid-fluid levels and ventricular enlargement on CT.",
             "intraparenchymal": "Well-defined hyperdense lesion within brain parenchyma, round or oval, surrounded by low-density perilesional edema ring on CT.",
             "subarachnoid": "Hyperdense material filling sulci and cisterns, following brain surface contour with star-shaped pattern in basal cisterns on CT.",
             "epidural": "Biconvex lens-shaped hyperdense collection between skull and dura mater that does not cross suture lines on CT.",
             "subdural": "Crescent-shaped hyperdense collection along brain convexity crossing suture lines with possible midline shift on CT.",
-            "ambiguous": "Ill-defined hyperdense region with mixed density patterns and unclear boundaries between hemorrhage types on CT.",
         }
 
     def _encode_texts(self, device: torch.device) -> torch.Tensor:
@@ -97,6 +96,11 @@ class TextEncoder(nn.Module):
         if self._encoder == "dummy":
             # Return random embeddings when transformers is not available
             return torch.randn(len(texts), self.embed_dim, device=device)
+
+        # Explicitly move encoder to target device before use
+        self._encoder = self._encoder.to(device)
+        self._projection = self._projection.to(device)
+        self._norm = self._norm.to(device)
 
         # Tokenize
         tokens = self._tokenizer(
