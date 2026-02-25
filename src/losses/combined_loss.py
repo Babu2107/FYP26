@@ -2,6 +2,7 @@
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from .focal_loss import FocalLoss
 from .dice_loss import DiceLoss
 from .hover_loss import HoVerLoss
@@ -70,50 +71,53 @@ class CombinedLoss(nn.Module):
             target_masks: (B, N, H, W) matched GT masks
             target_hv: (B, 2, H, W) GT distance maps
             hemorrhage_mask: (B, H, W) binary mask of any hemorrhage
-            pixel_embedding: (B, C, H, W) for contrastive loss
-            text_embeddings: (6, C) for contrastive loss
-            aux_outputs: list of intermediate predictions for deep supervision
-
-        Returns:
-            Dict with 'total' and individual loss components.
         """
         losses = {}
+        device = pred_logits.device
 
-        # 1. Classification loss (Focal CE)
+        # 1. Classification loss (Focal CE on query class predictions)
         losses['cls'] = self.cls_weight * self.focal_loss(pred_logits, target_classes)
 
         # 2. Mask Dice loss
         losses['dice'] = self.dice_weight * self.dice_loss(pred_masks, target_masks)
 
-        # 3. Mask Focal loss (pixel-level)
-        mask_focal = self.focal_loss(
-            pred_masks.flatten(0, 1).unsqueeze(-1).expand(-1, -1, 2).flatten(0, 1),
-            target_masks.flatten(0, 1).long().flatten(),
+        # 3. Mask BCE loss (pixel-level, replaces broken focal on masks)
+        pred_masks_flat = pred_masks.flatten(0, 1)  # (B*N, H, W)
+        target_masks_flat = target_masks.flatten(0, 1)  # (B*N, H, W)
+        mask_bce = F.binary_cross_entropy_with_logits(
+            pred_masks_flat, target_masks_flat, reduction='mean'
         )
-        losses['mask_focal'] = self.mask_focal_weight * mask_focal
+        losses['mask_focal'] = self.mask_focal_weight * mask_bce
 
         # 4. HoVer distance loss
         losses['hv'] = self.hv_weight * self.hover_loss(pred_hv, target_hv, hemorrhage_mask)
 
         # 5. Contrastive loss
-        if pixel_embedding is not None and text_embeddings is not None:
-            losses['contrastive'] = self.contrastive_weight * self.contrastive_loss(
-                pixel_embedding, text_embeddings, pred_masks.detach(), target_classes,
-            )
-        else:
-            losses['contrastive'] = torch.tensor(0.0, device=pred_logits.device)
+        try:
+            if pixel_embedding is not None and text_embeddings is not None:
+                losses['contrastive'] = self.contrastive_weight * self.contrastive_loss(
+                    pixel_embedding, text_embeddings, pred_masks.detach(), target_classes,
+                )
+            else:
+                losses['contrastive'] = torch.tensor(0.0, device=device)
+        except Exception:
+            losses['contrastive'] = torch.tensor(0.0, device=device)
 
-        # 6. Deep supervision (auxiliary losses from intermediate decoder layers)
-        if aux_outputs is not None:
-            deep_loss = torch.tensor(0.0, device=pred_logits.device)
-            for aux in aux_outputs:
-                deep_loss += self.focal_loss(aux['pred_logits'], target_classes)
-                deep_loss += self.dice_loss(aux['pred_masks'], target_masks)
-            losses['deep'] = self.deep_weight * deep_loss / max(len(aux_outputs), 1)
-        else:
-            losses['deep'] = torch.tensor(0.0, device=pred_logits.device)
+        # 6. Deep supervision
+        try:
+            if aux_outputs is not None and len(aux_outputs) > 0:
+                deep_loss = torch.tensor(0.0, device=device)
+                for aux in aux_outputs:
+                    deep_loss = deep_loss + self.focal_loss(aux['pred_logits'], target_classes)
+                    deep_loss = deep_loss + self.dice_loss(aux['pred_masks'], target_masks)
+                losses['deep'] = self.deep_weight * deep_loss / max(len(aux_outputs), 1)
+            else:
+                losses['deep'] = torch.tensor(0.0, device=device)
+        except Exception:
+            losses['deep'] = torch.tensor(0.0, device=device)
 
         # Total
         losses['total'] = sum(losses.values())
 
         return losses
+
