@@ -35,6 +35,13 @@ def get_train_transforms(image_size: int = 256):
         A.Rotate(limit=15, p=0.5, border_mode=0),
         A.ElasticTransform(alpha=50, sigma=5, p=0.3),
         A.RandomScale(scale_limit=0.15, p=0.3),
+        A.PadIfNeeded(
+            min_height=int(image_size * 0.875),
+            min_width=int(image_size * 0.875),
+            border_mode=0,
+            value=0,
+            mask_value=0,
+        ),
         A.RandomCrop(height=int(image_size * 0.875), width=int(image_size * 0.875), p=0.5),
         A.Resize(image_size, image_size),
 
