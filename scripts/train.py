@@ -63,16 +63,20 @@ def main():
     )
 
     # Model
+    loss_cfg = config.get("loss", {})
     model = SymPanICHNetModule(
         backbone_name=config.get("model", {}).get("backbone", {}).get("name", "swinv2_tiny_window8_256"),
         pretrained=config.get("model", {}).get("backbone", {}).get("pretrained", True),
         num_queries=config.get("model", {}).get("panoptic_head", {}).get("num_queries", 50),
-        num_classes=config.get("data", {}).get("num_classes", 7),
+        num_classes=config.get("data", {}).get("num_classes", 6),
         base_lr=config.get("training", {}).get("optimizer", {}).get("lr", 1e-4),
         weight_decay=config.get("training", {}).get("optimizer", {}).get("weight_decay", 0.05),
         max_epochs=max_epochs,
-        cls_weight=config.get("loss", {}).get("cls_weight", 2.0),
-        dice_weight=config.get("loss", {}).get("dice_weight", 5.0),
+        cls_weight=loss_cfg.get("cls_weight", 2.0),
+        dice_weight=loss_cfg.get("dice_weight", 5.0),
+        mask_focal_weight=loss_cfg.get("mask_focal_weight", 5.0),
+        hv_weight=loss_cfg.get("hv_weight", 1.0),
+        contrastive_weight=loss_cfg.get("contrastive_weight", 0.5),
     )
 
     # Callbacks

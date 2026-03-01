@@ -141,7 +141,7 @@ class PanopticHead(nn.Module):
         self,
         hidden_dim: int = 256,
         num_queries: int = 50,
-        num_classes: int = 7,
+        num_classes: int = 6,
         num_decoder_layers: int = 9,
         num_heads: int = 8,
         num_feature_levels: int = 3,

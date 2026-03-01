@@ -20,12 +20,17 @@ def compute_dice(pred: torch.Tensor, target: torch.Tensor, smooth: float = 1e-6)
         smooth: Smoothing factor to avoid division by zero.
 
     Returns:
-        Dice score (scalar tensor).
+        Dice score (scalar tensor).  Returns 0.0 when both masks are empty.
     """
     pred = pred.float().flatten()
     target = target.float().flatten()
+    pred_sum = pred.sum()
+    target_sum = target.sum()
+    # Both empty → return 0 (not 1); a vacuously-correct score is misleading
+    if pred_sum == 0 and target_sum == 0:
+        return torch.tensor(0.0, device=pred.device)
     intersection = (pred * target).sum()
-    return (2.0 * intersection + smooth) / (pred.sum() + target.sum() + smooth)
+    return (2.0 * intersection + smooth) / (pred_sum + target_sum + smooth)
 
 
 def compute_iou(pred: torch.Tensor, target: torch.Tensor, smooth: float = 1e-6) -> torch.Tensor:
@@ -71,7 +76,7 @@ def compute_per_class_dice(
         pred_c = (pred == c).float()
         target_c = (target == c).float()
         if target_c.sum() == 0 and pred_c.sum() == 0:
-            results[c] = 1.0  # Both empty = perfect
+            results[c] = 0.0  # Both empty — not a meaningful score
         elif target_c.sum() == 0:
             results[c] = 0.0  # False positive
         else:

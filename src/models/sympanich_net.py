@@ -47,7 +47,7 @@ class SymPanICHNetV2(nn.Module):
         fpn_out_channels: int = 256,
         # Panoptic head config
         num_queries: int = 50,
-        num_classes: int = 7,
+        num_classes: int = 6,
         num_decoder_layers: int = 9,
         # Text encoder config
         text_model_name: str = "microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract",

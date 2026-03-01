@@ -15,11 +15,13 @@ class FocalLoss(nn.Module):
     L_focal = -α(1-p_t)^γ * log(p_t)
     """
 
-    def __init__(self, gamma: float = 2.0, alpha: float = 0.25, reduction: str = "mean"):
+    def __init__(self, gamma: float = 2.0, alpha: float = 0.25,
+                 reduction: str = "mean", no_object_weight: float = 0.1):
         super().__init__()
         self.gamma = gamma
         self.alpha = alpha
         self.reduction = reduction
+        self.no_object_weight = no_object_weight
 
     def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         """
@@ -30,7 +32,19 @@ class FocalLoss(nn.Module):
         Returns:
             Focal loss scalar.
         """
-        ce_loss = F.cross_entropy(inputs.view(-1, inputs.shape[-1]), targets.view(-1), reduction="none")
+        num_classes = inputs.shape[-1]
+
+        # Build per-class weights: down-weight background/no-object (class 0)
+        # so the model can't collapse to all-background predictions
+        weight = torch.ones(num_classes, device=inputs.device)
+        weight[0] = self.no_object_weight
+
+        ce_loss = F.cross_entropy(
+            inputs.reshape(-1, num_classes),
+            targets.reshape(-1),
+            weight=weight,
+            reduction="none",
+        )
         pt = torch.exp(-ce_loss)
         focal_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
 

@@ -35,7 +35,7 @@ class SymPanICHNetModule(pl.LightningModule):
         backbone_name: str = "swinv2_tiny_window8_256",
         pretrained: bool = True,
         num_queries: int = 50,
-        num_classes: int = 7,
+        num_classes: int = 6,
         num_decoder_layers: int = 9,
         use_context: bool = True,
         text_descriptions_path: Optional[str] = None,
@@ -90,23 +90,22 @@ class SymPanICHNetModule(pl.LightningModule):
         # Forward pass
         outputs = self.model(images, images_flipped)
 
-        # Create dummy matched targets for now
-        # (Full Hungarian matching will be added when dataset format is confirmed)
         B, N, C = outputs['pred_logits'].shape
         H, W = outputs['pred_masks'].shape[-2:]
+        num_classes = C  # includes background class 0
 
-        # Simple target creation: use semantic mask as supervision
+        # ---- Build per-query targets ----
+        # Default: every query is "no object" (class 0 = background).
+        # Queries matched to a hemorrhage class get class 1-5 and a mask.
         target_classes = torch.zeros(B, N, dtype=torch.long, device=images.device)
         target_masks = torch.zeros(B, N, H, W, device=images.device)
 
-        # Assign first few queries to detected classes
         for b in range(B):
             unique_classes = gt_mask[b].unique()
-            unique_classes = unique_classes[unique_classes > 0]  # Remove background
+            unique_classes = unique_classes[unique_classes > 0]  # foreground only
             for qi, cls_id in enumerate(unique_classes[:N]):
                 target_classes[b, qi] = cls_id
                 cls_mask = (gt_mask[b] == cls_id).float()
-                # Resize GT mask to match prediction size
                 cls_mask_resized = F.interpolate(
                     cls_mask.unsqueeze(0).unsqueeze(0),
                     size=(H, W), mode="nearest"
@@ -120,7 +119,7 @@ class SymPanICHNetModule(pl.LightningModule):
             hemorrhage_mask.unsqueeze(1).float(), size=(H, W), mode="nearest"
         ).squeeze(1)
 
-        # Compute losses
+        # ---- Compute losses ----
         losses = self.criterion(
             pred_logits=outputs['pred_logits'],
             pred_masks=outputs['pred_masks'],
@@ -136,7 +135,9 @@ class SymPanICHNetModule(pl.LightningModule):
 
         # Log losses
         for name, val in losses.items():
-            self.log(f"train/{name}", val, on_step=True, on_epoch=True, prog_bar=(name == 'total'))
+            prog = (name == 'total')
+            self.log(f"train/{name}", val, on_step=True, on_epoch=True, prog_bar=prog)
+        self.log("train/loss", losses['total'], on_step=False, on_epoch=True, prog_bar=True)
 
         return losses['total']
 
@@ -150,13 +151,19 @@ class SymPanICHNetModule(pl.LightningModule):
 
         # Simple metric: semantic segmentation Dice
         pred_semantic = outputs['pred_logits'].argmax(dim=-1)  # (B, N)
-        # Use the highest-confidence mask per class for evaluation
-        pred_scores = outputs['pred_logits'].softmax(dim=-1)
 
         # Compute per-class dice on the semantic map
         B = images.shape[0]
         dice_scores = []
         for b in range(B):
+            gt_hem = (gt_mask[b] > 0).float()
+
+            # Skip slices with NO hemorrhage GT — they would give
+            # a trivially perfect dice (0/0 → 1.0 via smoothing) and
+            # inflate the metric.
+            if gt_hem.sum() == 0:
+                continue
+
             semantic_pred = torch.zeros_like(gt_mask[b])
             # Assign each pixel to the class of the highest-scoring query
             masks = outputs['pred_masks'][b].sigmoid()
@@ -170,14 +177,19 @@ class SymPanICHNetModule(pl.LightningModule):
                     ).squeeze() > 0.5
                     semantic_pred[mask] = cls
 
-            # Overall hemorrhage dice
+            # Overall hemorrhage dice (only for slices WITH hemorrhage)
             pred_hem = (semantic_pred > 0).float()
-            gt_hem = (gt_mask[b] > 0).float()
             dice = compute_dice(pred_hem, gt_hem)
             dice_scores.append(dice)
 
-        avg_dice = torch.stack(dice_scores).mean()
+        if len(dice_scores) > 0:
+            avg_dice = torch.stack(dice_scores).mean()
+        else:
+            # Entire batch had no hemorrhage — report 0
+            avg_dice = torch.tensor(0.0, device=images.device)
+
         self.log("val/dice", avg_dice, on_epoch=True, prog_bar=True)
+        self.log("val/num_hem_slices", float(len(dice_scores)), on_epoch=True)
 
     def on_train_epoch_start(self):
         """Handle phased training transitions."""
